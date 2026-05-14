@@ -26,8 +26,8 @@ class NTPropertyHost:
             return super().__setattr__(name, value)
 
     def __getattribute__(self, name):
-        if hasattr(self, name) and isinstance(self.__dict__[name], NTProperty):
-            return self.__dict__[name].get()
+        if isinstance(super().__getattribute__(name), NTProperty):
+            return super().__getattribute__(name).get()
         return super().__getattribute__(name)
 
 
@@ -44,7 +44,7 @@ class NumberProperty(NTProperty):
             self.pub = None
 
         def update(evt: ntcore.Event):
-            value = value.getDouble()
+            value = evt.data.value.getDouble()
             self.cached = value
 
         self.value_listener = NTProperty.nt_instance.addListener(self.sub, ntcore.EventFlags.kValueAll, update)
