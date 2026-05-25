@@ -1,6 +1,6 @@
 [project]
 name = "ntprop"
-version = "0.2.4"
+version = "0.2.6"
 description = "A way to create transparent NetworkTables variables"
 authors = [
     {name = "Kellen Watt",email = "kellen@wattsoft.dev"}
