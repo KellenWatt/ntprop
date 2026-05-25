@@ -17,7 +17,8 @@ class NTProperty:
         self.bindings = []
         self.path = name
         self.default = default
-        self.cached = self.default
+        self._update(self.default, remote=False)
+        #  self.cached = self.default
         topic = getattr(NTProperty.nt_instance, f"get{type(self).ty}Topic")(name)
         self.sub = topic.subscribe(default)
         if not readonly or force_publish:
@@ -30,7 +31,7 @@ class NTProperty:
 
         def update(evt: ntcore.Event):
             value = getattr(evt.data.value, f"get{type(self).ty}")()
-            self.cached = value
+            self._update(value, remote=True)
 
         self.value_listener = NTProperty.nt_instance.addListener(self.sub, ntcore.EventFlags.kValueAll, update)
 
@@ -43,21 +44,27 @@ class NTProperty:
         if self.pub is not None:
             self.pub.close()
     
-    @property
-    def cached(self) -> Any:
-        return self._cached
-
-    @cached.setter
-    def cached(self, value: Any):
-        for binding in self.bindings:
-            binding(value)
+    def _update(self, value: Any, remote: bool=False):
         self._cached = value
+        for binding in self.bindings:
+            binding(value, remote)
+    #  @property
+    #  def cached(self) -> Any:
+    #      return self._cached
+    #  
+    #  @cached.setter
+    #  def cached(self, value: Any):
+    #      for binding in self.bindings:
+    #          binding(value)
+    #      self._cached = value
 
-    def bind(self, callback: Callable[[Any], None]):
+    def bind(self, callback: Callable[[Any, bool], None]):
         self.bindings.append(callback)
 
     def get(self) -> Any:
-        raise NotImplementedError()
+        """Returns the current value of the property. The base implementation is sufficient for basic behaviour, however, the
+        type signature returns an `Any`. Override the method and return `self._cached` if this is undesirable"""
+        return self._cached
 
     def set(self, value: Any):
         raise NotImplementedError()
@@ -81,7 +88,7 @@ class NTPropertyHost:
             return super().__getattribute__(name).get()
         return super().__getattribute__(name)
 
-    def bind(self, **kwargs: Callable[[Any], None]):
+    def bind(self, **kwargs: Callable[[Any, bool], None]):
         if not hasattr(self, "_ntdict"):
             return
         for name, callback in kwargs.items():
@@ -95,12 +102,12 @@ class NumberProperty(NTProperty, ty="Double"):
         super().__init__(name, default, readonly, force_publish)
 
     def get(self) -> float:
-        return self.cached
+        return self._cached
 
     def set(self, value: float | int):
         if type(value) is not float and type(value) is not int:
             raise ValueError("Can not assign non-numeric to NumberProperty")
-        self.cached = value
+        self._update(value)
         self.pub.set(value)
 
 
@@ -110,14 +117,14 @@ class BooleanProperty(NTProperty, ty="Boolean"):
         self.strict = strict
 
     def get(self) -> bool:
-        return self.cached
+        return self._cached
 
     def set(self, value: bool):
         if self.strict and type(value) is not bool:
             raise ValueError("Can not assign non-boolean to BooleanProperty in strict mode")
 
         value = bool(value)
-        self.cached = value
+        self._update(value)
         self.pub.set(value)
 
 
@@ -127,12 +134,12 @@ class StringProperty(NTProperty, ty="String"):
         self.strict = strict
 
     def get(self) -> str:
-        return self.cached
+        return self._cached
 
     def set(self, value: str):
         if self.strict and type(value) is not str:
             raise ValueError("Can not assign non-string to StringProperty in strict mode")
 
         value = str(value)
-        self.cached = value
+        self._update(value)
         self.pub.set(value)
