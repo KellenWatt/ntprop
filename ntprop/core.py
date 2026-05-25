@@ -35,7 +35,10 @@ class NTProperty:
         self.value_listener = NTProperty.nt_instance.addListener(self.sub, ntcore.EventFlags.kValueAll, update)
 
     def __del__(self):
-        NTProperty.nt_instance.remove_listener(self.value_listener)
+        if NTProperty.nt_instance is None:
+            # Shouldn't every happen, but just to be safe
+            return
+        NTProperty.nt_instance.removeListener(self.value_listener)
         self.sub.close()
         if self.pub is not None:
             self.pub.close()
@@ -66,7 +69,7 @@ class NTPropertyHost:
             if not hasattr(self, "_ntdict"):
                 self._ntdict = {}
             self._ntdict[value.path] = value
-            super().__setattr__(name, value)
+            return super().__setattr__(name, value)
         elif isinstance(self.__dict__.get(name), NTProperty):
             self.__dict__[name].set(value)
             return value
