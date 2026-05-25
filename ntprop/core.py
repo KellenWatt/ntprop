@@ -31,7 +31,7 @@ class NTProperty:
 
         def update(evt: ntcore.Event):
             value = getattr(evt.data.value, f"get{type(self).ty}")()
-            self._update(value, remote=True)
+            self._update(value, remote=evt.is_(ntcore.EventFlags.kValueRemote))
 
         self.value_listener = NTProperty.nt_instance.addListener(self.sub, ntcore.EventFlags.kValueAll, update)
 
