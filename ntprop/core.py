@@ -44,7 +44,8 @@ class NTProperty:
     def cached(self) -> Any:
         return self._cached
 
-    @cached.setter(self, value: Any):
+    @cached.setter
+    def cached(self, value: Any):
         for binding in self.bindings:
             binding(value)
         self._cached = value
@@ -86,7 +87,7 @@ class NTPropertyHost:
 
 
 
-class NumberProperty(NTProperty):
+class NumberProperty(NTProperty, ty="Double"):
     def __init__(self, name: str, default: float | int = 0.0, readonly = False, force_publish: bool = True):
         super().__init__(name, default, readonly, force_publish)
 
@@ -94,13 +95,13 @@ class NumberProperty(NTProperty):
         return self.cached
 
     def set(self, value: float | int):
-        if value is not float and value is not int:
+        if type(value) is not float and type(value) is not int:
             raise ValueError("Can not assign non-numeric to NumberProperty")
         self.cached = value
         self.pub.set(value)
 
 
-class BooleanProperty(NTProperty):
+class BooleanProperty(NTProperty, ty="Boolean"):
     def __init__(self, name: str, default: bool = False, readonly = False, strict: bool = False, force_publish: bool = True):
         super().__init__(name, default, readonly, force_publish)
         self.strict = strict
@@ -109,7 +110,7 @@ class BooleanProperty(NTProperty):
         return self.cached
 
     def set(self, value: bool):
-        if self.strict and value is not bool:
+        if self.strict and type(value) is not bool:
             raise ValueError("Can not assign non-boolean to BooleanProperty in strict mode")
 
         value = bool(value)
@@ -117,7 +118,7 @@ class BooleanProperty(NTProperty):
         self.pub.set(value)
 
 
-class StringProperty(NTProperty):
+class StringProperty(NTProperty, ty="String"):
     def __init__(self, name: str, default: str = "", readonly = False, strict: bool = False, force_publish: bool = True):
         super().__init__(name, default, readonly, force_publish)
         self.strict = strict
@@ -126,7 +127,7 @@ class StringProperty(NTProperty):
         return self.cached
 
     def set(self, value: str):
-        if self.strict and value is not str:
+        if self.strict and type(value) is not str:
             raise ValueError("Can not assign non-string to StringProperty in strict mode")
 
         value = str(value)
