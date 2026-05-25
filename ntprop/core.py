@@ -1,14 +1,56 @@
-from typing import Any, ClassVar, Optional
+from typing import Any, ClassVar, Optional, Callable
 import ntcore
 
 class NTProperty:
     nt_instance: ClassVar[Optional[ntcore.NetworkTableInstance]] = None
 
-    def __init__(self):
+    def __init_subclass__(cls, ty: str, **kwargs):
+        super().__init_subclass__(**kwargs)
+        cls.ty = ty
+
+    def __init__(self, name: str, default: Any = None, readonly: bool = False, force_publish: bool = True):
         if NTProperty.nt_instance is None:
             NTProperty.nt_instance = ntcore.NetworkTableInstance.getDefault()
         NTProperty.nt_instance.setServer("localhost", 0)
         NTProperty.nt_instance.startClient4("Reflection")
+
+        self.bindings = []
+        self.path = name
+        self.default = default
+        self.cached = self.default
+        topic = getattr(NTProperty.nt_instance, f"get{type(self).ty}Topic")(name)
+        self.sub = topic.subscribe(default)
+        if not readonly or force_publish:
+            self.pub = topic.publish()
+            if force_publish and readonly:
+                self.pub.close()
+                self.pub = None
+        else:
+            self.pub = None
+
+        def update(evt: ntcore.Event):
+            value = getattr(evt.data.value, f"get{type(self).ty}")()
+            self.cached = value
+
+        self.value_listener = NTProperty.nt_instance.addListener(self.sub, ntcore.EventFlags.kValueAll, update)
+
+    def __del__(self):
+        NTProperty.nt_instance.remove_listener(self.value_listener)
+        self.sub.close()
+        if self.pub is not None:
+            self.pub.close()
+    
+    @property
+    def cached(self) -> Any:
+        return self._cached
+
+    @cached.setter(self, value: Any):
+        for binding in self.bindings:
+            binding(value)
+        self._cached = value
+
+    def bind(self, callback: Callable[[Any], None]):
+        self.bindings.append(callback)
 
     def get(self) -> Any:
         raise NotImplementedError()
@@ -19,7 +61,12 @@ class NTProperty:
 
 class NTPropertyHost:
     def __setattr__(self, name, value):
-        if isinstance(name, NTProperty):
+        if not hasattr(self, name) and isinstance(value, NTProperty):
+            if not hasattr(self, "_ntdict"):
+                self._ntdict = {}
+            self._ntdict[value.path] = value
+            super().__setattr__(name, value)
+        elif isinstance(self.__dict__.get(name), NTProperty):
             self.__dict__[name].set(value)
             return value
         else:
@@ -30,30 +77,18 @@ class NTPropertyHost:
             return super().__getattribute__(name).get()
         return super().__getattribute__(name)
 
+    def bind(self, **kwargs: Callable[[Any], None]):
+        if not hasattr(self, "_ntdict"):
+            return
+        for name, callback in kwargs.items():
+            if name in self._ntdict:
+                self._ntdict[name].bind(callback)
+
+
 
 class NumberProperty(NTProperty):
-    def __init__(self, name: str, default: float | int = 0.0, readonly = False):
-        super().__init__()
-        self.default = default
-        self.cached = self.default
-        topic = NTProperty.nt_instance.getDoubleTopic(name)
-        self.sub = topic.subscribe(default)
-        if not readonly:
-            self.pub = topic.publish()
-        else:
-            self.pub = None
-
-        def update(evt: ntcore.Event):
-            value = evt.data.value.getDouble()
-            self.cached = value
-
-        self.value_listener = NTProperty.nt_instance.addListener(self.sub, ntcore.EventFlags.kValueAll, update)
-
-    def __del__(self):
-        NTProperty.nt_instance.remove_listener(self.value_listener)
-        self.sub.close()
-        if self.pub is not None:
-            self.pub.close()
+    def __init__(self, name: str, default: float | int = 0.0, readonly = False, force_publish: bool = True):
+        super().__init__(name, default, readonly, force_publish)
 
     def get(self) -> float:
         return self.cached
@@ -66,29 +101,9 @@ class NumberProperty(NTProperty):
 
 
 class BooleanProperty(NTProperty):
-    def __init__(self, name: str, default: bool = False, readonly = False, strict: bool = False):
-        super().__init__()
-        self.default = default
-        self.cached = self.default
+    def __init__(self, name: str, default: bool = False, readonly = False, strict: bool = False, force_publish: bool = True):
+        super().__init__(name, default, readonly, force_publish)
         self.strict = strict
-        topic = NTProperty.nt_instance.getBooleanTopic(name)
-        self.sub = topic.subscribe(default)
-        if not readonly:
-            self.pub = topic.publish()
-        else:
-            self.pub = None
-
-        def update(evt: ntcore.Event):
-            value = value.getBoolean()
-            self.cached = value
-
-        self.value_listener = NTProperty.nt_instance.addListener(self.sub, ntcore.EventFlags.kValueAll, update)
-
-    def __del__(self):
-        NTProperty.nt_instance.remove_listener(self.value_listener)
-        self.sub.close()
-        if self.pub is not None:
-            self.pub.close()
 
     def get(self) -> bool:
         return self.cached
@@ -103,29 +118,9 @@ class BooleanProperty(NTProperty):
 
 
 class StringProperty(NTProperty):
-    def __init__(self, name: str, default: bool, readonly = False, strict: bool = False):
-        super().__init__()
-        self.default = default
-        self.cached = self.default
+    def __init__(self, name: str, default: str = "", readonly = False, strict: bool = False, force_publish: bool = True):
+        super().__init__(name, default, readonly, force_publish)
         self.strict = strict
-        topic = NTProperty.nt_instance.getStringTopic(name)
-        self.sub = topic.subscribe(default)
-        if not readonly:
-            self.pub = topic.publish()
-        else:
-            self.pub = None
-
-        def update(evt: ntcore.Event):
-            value = value.getString()
-            self.cached = value
-
-        self.value_listener = NTProperty.nt_instance.addListener(self.sub, ntcore.EventFlags.kValueAll, update)
-
-    def __del__(self):
-        NTProperty.nt_instance.remove_listener(self.value_listener)
-        self.sub.close()
-        if self.pub is not None:
-            self.pub.close()
 
     def get(self) -> str:
         return self.cached
