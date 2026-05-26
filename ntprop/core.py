@@ -8,7 +8,7 @@ class NTProperty:
         super().__init_subclass__(**kwargs)
         cls.ty = ty
 
-    def __init__(self, name: str, default: Any = None, readonly: bool = False, force_publish: bool = True):
+    def __init__(self, name: str, default: Any = None, readonly: bool = False):
         if NTProperty.nt_instance is None:
             NTProperty.nt_instance = ntcore.NetworkTableInstance.getDefault()
         NTProperty.nt_instance.setServer("localhost", 0)
@@ -16,17 +16,15 @@ class NTProperty:
 
         self.bindings = []
         self.path = name
-        self.default = default
-        self._update(self.default, remote=False)
-        #  self.cached = self.default
+        self.readonly = readonly
+        self._update(default, remote=False)
+
         topic = getattr(NTProperty.nt_instance, f"get{type(self).ty}Topic")(name)
         self.sub = topic.subscribe(default)
-        if not readonly or force_publish:
-            self.pub = topic.publish()
-            if force_publish and readonly:
-                self.pub.close()
-                self.pub = None
-        else:
+        self.pub = topic.publish()
+        self.pub.set(default)
+        if readonly:
+            self.pub.close()
             self.pub = None
 
         def update(evt: ntcore.Event):
@@ -48,15 +46,6 @@ class NTProperty:
         self._cached = value
         for binding in self.bindings:
             binding(value, remote)
-    #  @property
-    #  def cached(self) -> Any:
-    #      return self._cached
-    #  
-    #  @cached.setter
-    #  def cached(self, value: Any):
-    #      for binding in self.bindings:
-    #          binding(value)
-    #      self._cached = value
 
     def bind(self, callback: Callable[[Any, bool], None]):
         self.bindings.append(callback)
@@ -67,7 +56,10 @@ class NTProperty:
         return self._cached
 
     def set(self, value: Any):
-        raise NotImplementedError()
+        if self.readonly:
+            raise ValueError("Can't update a readonly property")
+        self._update(value)
+        self.pub(value)
 
 
 class NTPropertyHost:
@@ -107,8 +99,7 @@ class NumberProperty(NTProperty, ty="Double"):
     def set(self, value: float | int):
         if type(value) is not float and type(value) is not int:
             raise ValueError("Can not assign non-numeric to NumberProperty")
-        self._update(value)
-        self.pub.set(value)
+        super().set(value)
 
 
 class BooleanProperty(NTProperty, ty="Boolean"):
@@ -124,8 +115,7 @@ class BooleanProperty(NTProperty, ty="Boolean"):
             raise ValueError("Can not assign non-boolean to BooleanProperty in strict mode")
 
         value = bool(value)
-        self._update(value)
-        self.pub.set(value)
+        super().set(value)
 
 
 class StringProperty(NTProperty, ty="String"):
@@ -141,5 +131,4 @@ class StringProperty(NTProperty, ty="String"):
             raise ValueError("Can not assign non-string to StringProperty in strict mode")
 
         value = str(value)
-        self._update(value)
-        self.pub.set(value)
+        super().set(value)
