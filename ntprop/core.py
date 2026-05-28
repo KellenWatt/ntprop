@@ -2,31 +2,51 @@ from typing import Any, ClassVar, Optional, Callable
 import ntcore
 
 class NTProperty:
-    nt_instance: ClassVar[Optional[ntcore.NetworkTableInstance]] = None
-    server_address: ClassVar[tuple[str, int]] = ("localhost", 0)
+    #  nt_instance: ClassVar[Optional[ntcore.NetworkTableInstance]] = None
+    nt_instances: ClassVar[dict[str | None, ntcore.NetworkTableInstance]] = {}
+    default_server_address: ClassVar[tuple[str, int]] = ("localhost", 0)
 
     @classmethod
-    def set_server(cls, address: str, port: int = 0):
-        if cls.nt_instance is not None:
-            raise ValueError("Server address cannot be changed once started")
-        cls.server_address = (address, port)
+    def set_default_address(cls, address: str, port: int = 0):
+        cls.default_server_address = (address, port)
+
+    @classmethod
+    def create_instance(cls, name: Optional[str] = None, address: Optional[str] = None, port: Optional[int] = None) -> ntcore.NetworkTableInstance:
+        """Attempts to create a new NetworkTables instance with the given address and port (uses the class defaults if not provided),
+        then associates that instance with the given name. If an instance is already associated with the name, that is returned instead,
+        ignoring the address and port arguments.
+
+        If no name is provided, this will default to the default NetworkTables instance (`NetworkTableInstance.getDefault()`)"""
+        if name in cls.nt_instances:
+            return cls.nt_instances[name]
+        if address is None:
+            address = cls.default_server_address[0]
+        if port is None:
+            port = cls.default_server_address[1]
+        if name is None:
+            inst = ntcore.NetworkTableInstance.getDefault()
+        else:
+            inst = ntcore.NetworkTableInstance.create()
+        inst.setServer(address, port)
+        inst.startClient4("Reflection")
+        cls.nt_instances[name] = inst
+        return inst
+
 
     def __init_subclass__(cls, ty: str, **kwargs):
         super().__init_subclass__(**kwargs)
         cls.ty = ty
 
-    def __init__(self, name: str, default: Any = None, readonly: bool = False, persistent: bool = False):
-        if NTProperty.nt_instance is None:
-            NTProperty.nt_instance = ntcore.NetworkTableInstance.getDefault()
-            NTProperty.nt_instance.setServer(*NTProperty.server_address)
-            NTProperty.nt_instance.startClient4("Reflection")
-
+    def __init__(self, name: str, default: Any = None, readonly: bool = False, persistent: bool = False, **kwargs):
+        """Additional arguments can be provided as kwargs to control which instance the property connects to. See the
+        `NTProperty.create_instance` class method for usable arguments and their meaning."""
         self.bindings = []
         self.path = name
         self.readonly = readonly
         self._update(default, remote=False)
+        self.instance = type(self).create_instance(kwargs.get("instance"), kwargs.get("address"), kwargs.get("port"))
 
-        topic = getattr(NTProperty.nt_instance, f"get{type(self).ty}Topic")(name)
+        topic = getattr(self.instance, f"get{type(self).ty}Topic")(name)
         topic.setPersistent(persistent)
         self.sub = topic.subscribe(default)
         # Note for future testing: setRetained on topic may allow readonly props to not retain self.pub
@@ -37,13 +57,13 @@ class NTProperty:
             value = getattr(evt.data.value, f"get{type(self).ty}")()
             self._update(value, remote=evt.is_(ntcore.EventFlags.kValueRemote))
 
-        self.value_listener = NTProperty.nt_instance.addListener(self.sub, ntcore.EventFlags.kValueRemote, update)
+        self.value_listener = self.instance.addListener(self.sub, ntcore.EventFlags.kValueRemote, update)
 
     def __del__(self):
-        if NTProperty.nt_instance is None:
+        if self.instance is None:
             # Shouldn't ever happen, but just to be safe
             return
-        NTProperty.nt_instance.removeListener(self.value_listener)
+        self.instance.removeListener(self.value_listener)
         self.sub.close()
         if self.pub is not None:
             self.pub.close()
@@ -96,8 +116,8 @@ class NTPropertyHost:
 
 
 class NumberProperty(NTProperty, ty="Double"):
-    def __init__(self, name: str, default: float | int = 0.0, readonly: bool = False, persistent: bool = False):
-        super().__init__(name, default, readonly, persistent)
+    def __init__(self, name: str, default: float | int = 0.0, readonly: bool = False, persistent: bool = False, **kwargs):
+        super().__init__(name, default, readonly, persistent, **kwargs)
 
     def get(self) -> float:
         return self._cached
@@ -109,8 +129,8 @@ class NumberProperty(NTProperty, ty="Double"):
 
 
 class BooleanProperty(NTProperty, ty="Boolean"):
-    def __init__(self, name: str, default: bool = False, strict: bool = False, readonly: bool = False, persistent: bool = False):
-        super().__init__(name, default, readonly, persistent)
+    def __init__(self, name: str, default: bool = False, strict: bool = False, readonly: bool = False, persistent: bool = False, **kwargs):
+        super().__init__(name, default, readonly, persistent, **kwargs)
         self.strict = strict
 
     def get(self) -> bool:
@@ -125,8 +145,8 @@ class BooleanProperty(NTProperty, ty="Boolean"):
 
 
 class StringProperty(NTProperty, ty="String"):
-    def __init__(self, name: str, default: str = "", strict: bool = False, readonly = False, persistent: bool = False):
-        super().__init__(name, default, readonly, persistent)
+    def __init__(self, name: str, default: str = "", strict: bool = False, readonly = False, persistent: bool = False, **kwargs):
+        super().__init__(name, default, readonly, persistent, **kwargs)
         self.strict = strict
 
     def get(self) -> str:
