@@ -3,16 +3,23 @@ import ntcore
 
 class NTProperty:
     nt_instance: ClassVar[Optional[ntcore.NetworkTableInstance]] = None
+    server_address: ClassVar[tuple[str, int]] = ("localhost", 0)
+
+    @classmethod
+    def set_server(cls, address: str, port: int = 0):
+        if cls.nt_instance is not None:
+            raise ValueError("Server address cannot be changed once started")
+        cls.server_address = (address, port)
 
     def __init_subclass__(cls, ty: str, **kwargs):
         super().__init_subclass__(**kwargs)
         cls.ty = ty
 
-    def __init__(self, name: str, default: Any = None, readonly: bool = False):
+    def __init__(self, name: str, default: Any = None, readonly: bool = False, persistent: bool = False):
         if NTProperty.nt_instance is None:
             NTProperty.nt_instance = ntcore.NetworkTableInstance.getDefault()
-        NTProperty.nt_instance.setServer("localhost", 0)
-        NTProperty.nt_instance.startClient4("Reflection")
+            NTProperty.nt_instance.setServer(*NTProperty.server_address)
+            NTProperty.nt_instance.startClient4("Reflection")
 
         self.bindings = []
         self.path = name
@@ -20,12 +27,11 @@ class NTProperty:
         self._update(default, remote=False)
 
         topic = getattr(NTProperty.nt_instance, f"get{type(self).ty}Topic")(name)
+        topic.setPersistent(persistent)
         self.sub = topic.subscribe(default)
+        # Note for future testing: setRetained on topic may allow readonly props to not retain self.pub
         self.pub = topic.publish()
-        self.pub.set(default)
-        if readonly:
-            self.pub.close()
-            self.pub = None
+        self.pub.setDefault(default)
 
         def update(evt: ntcore.Event):
             value = getattr(evt.data.value, f"get{type(self).ty}")()
@@ -35,7 +41,7 @@ class NTProperty:
 
     def __del__(self):
         if NTProperty.nt_instance is None:
-            # Shouldn't every happen, but just to be safe
+            # Shouldn't ever happen, but just to be safe
             return
         NTProperty.nt_instance.removeListener(self.value_listener)
         self.sub.close()
@@ -59,7 +65,7 @@ class NTProperty:
         if self.readonly:
             raise ValueError("Can't update a readonly property")
         self._update(value)
-        self.pub(value)
+        self.pub.set(value)
 
 
 class NTPropertyHost:
@@ -90,8 +96,8 @@ class NTPropertyHost:
 
 
 class NumberProperty(NTProperty, ty="Double"):
-    def __init__(self, name: str, default: float | int = 0.0, readonly = False, force_publish: bool = True):
-        super().__init__(name, default, readonly, force_publish)
+    def __init__(self, name: str, default: float | int = 0.0, readonly: bool = False, persistent: bool = False):
+        super().__init__(name, default, readonly, persistent)
 
     def get(self) -> float:
         return self._cached
@@ -103,8 +109,8 @@ class NumberProperty(NTProperty, ty="Double"):
 
 
 class BooleanProperty(NTProperty, ty="Boolean"):
-    def __init__(self, name: str, default: bool = False, readonly = False, strict: bool = False, force_publish: bool = True):
-        super().__init__(name, default, readonly, force_publish)
+    def __init__(self, name: str, default: bool = False, strict: bool = False, readonly: bool = False, persistent: bool = False):
+        super().__init__(name, default, readonly, persistent)
         self.strict = strict
 
     def get(self) -> bool:
@@ -119,8 +125,8 @@ class BooleanProperty(NTProperty, ty="Boolean"):
 
 
 class StringProperty(NTProperty, ty="String"):
-    def __init__(self, name: str, default: str = "", readonly = False, strict: bool = False, force_publish: bool = True):
-        super().__init__(name, default, readonly, force_publish)
+    def __init__(self, name: str, default: str = "", strict: bool = False, readonly = False, persistent: bool = False):
+        super().__init__(name, default, readonly, persistent)
         self.strict = strict
 
     def get(self) -> str:
